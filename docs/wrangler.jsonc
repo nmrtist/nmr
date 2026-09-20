@@ -1,0 +1,7 @@
+{
+  "name": "nmr",
+  "compatibility_date": "2026-09-20",
+  "assets": {
+    "directory": "./dist"
+  }
+}
