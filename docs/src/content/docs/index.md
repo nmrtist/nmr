@@ -34,7 +34,7 @@ domains, not general recovery guarantees. See [scientific evidence](/scientific-
 and the task-specific guides before using inferred results quantitatively.
 Reading supported 3D Bruker data does not imply 3D processing support.
 
-The source currently declares version `0.1.0` and is pre-release. APIs and
+The source currently declares version `0.1.1` and is pre-release. APIs and
 serialized development snapshots may change in place; preserve the matching
 source revision when saving work. The quickstart uses a local dependency and
 does not assume that this revision is published on a registry.
