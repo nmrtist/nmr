@@ -288,24 +288,36 @@ impl Objective<'_, '_, '_> {
         let mut derivative_log = 0.0;
         let mut negative = 0.0;
         let mut total = 0.0;
-        for (i, z) in self.values.iter().enumerate() {
-            if i % 4096 == 0 {
-                self.control.check_cancelled()?;
-            }
-            let (sin, cos) = (p0 + p1 * i as f64 / (n - 1).max(1) as f64).sin_cos();
-            let real = z.re * cos + z.im * sin;
-            total += real * real;
-            if real < 0.0 {
-                negative += real * real;
-            }
-            if i > 0 {
-                let d = (real - previous).abs();
-                derivative_sum += d;
-                if d > 0.0 {
-                    derivative_log += d * d.ln();
+        // Reuse the same short ramp in each block. Evaluate block anchors with
+        // sin_cos directly: error cannot accumulate along a long spectrum.
+        // No heap scratch or changes to sample/reduction/candidate order.
+        const BLOCK: usize = 64;
+        let denominator = (n - 1).max(1) as f64;
+        let mut ramp = [(0.0, 1.0); BLOCK];
+        for (i, rotation) in ramp.iter_mut().take(n).enumerate() {
+            *rotation = (p1 * i as f64 / denominator).sin_cos();
+        }
+        for (block, values) in self.values.chunks(BLOCK).enumerate() {
+            self.control.check_cancelled()?;
+            let start = block * BLOCK;
+            let (sin, cos) = (p0 + p1 * start as f64 / denominator).sin_cos();
+            for (offset, z) in values.iter().enumerate() {
+                let (ds, dc) = ramp[offset];
+                let real = z.re * (cos * dc - sin * ds) + z.im * (sin * dc + cos * ds);
+                total += real * real;
+                if real < 0.0 {
+                    negative += real * real;
                 }
+                // NegativeMinimization has no derivative entropy term.
+                if kind != 1 && start + offset > 0 {
+                    let d = (real - previous).abs();
+                    derivative_sum += d;
+                    if d > 0.0 {
+                        derivative_log += d * d.ln();
+                    }
+                }
+                previous = real;
             }
-            previous = real;
         }
         if total == 0.0 {
             return Ok(f64::INFINITY);
@@ -475,4 +487,93 @@ fn estimate(
         _ => unreachable!(),
     };
     Ok((result.0, result.1, result.2, objective.evaluations))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Independent original per-point trigonometric objective. Exercise long,
+    // non-block-aligned traces as well as both endpoints of the ramp search.
+    fn reference(values: &[Complex64], p0: f64, p1: f64, kind: usize) -> f64 {
+        let (mut previous, mut ds, mut dl, mut neg, mut total) = (0.0, 0.0, 0.0, 0.0, 0.0);
+        for (i, z) in values.iter().enumerate() {
+            let (sin, cos) = (p0 + p1 * i as f64 / (values.len() - 1) as f64).sin_cos();
+            let real = z.re * cos + z.im * sin;
+            total += real * real;
+            if real < 0.0 {
+                neg += real * real;
+            }
+            if i != 0 {
+                let d = (real - previous).abs();
+                ds += d;
+                if d > 0.0 {
+                    dl += d * d.ln();
+                }
+            }
+            previous = real;
+        }
+        if total == 0.0 {
+            return f64::INFINITY;
+        }
+        if kind == 1 {
+            return neg / total;
+        }
+        if ds == 0.0 {
+            return f64::INFINITY;
+        }
+        let entropy = ds.ln() - dl / ds;
+        if kind == 0 {
+            entropy + 1000.0 * neg
+        } else {
+            entropy / ((values.len() - 1).max(2) as f64).ln() + 4.0 * neg / total
+        }
+    }
+
+    #[test]
+    fn blocked_objectives_match_full_resolution_trigonometric_reference() {
+        for n in [4, 63, 64, 65, 257, 163_840, 163_841] {
+            let values: Vec<_> = (0..n)
+                .map(|i| {
+                    let x = i as f64;
+                    Complex64::new((x * 0.731).sin(), (x * 0.173).cos())
+                })
+                .collect();
+            let mut control = ExecutionContext::default();
+            let mut objective = Objective {
+                values: &values,
+                control: &mut control,
+                evaluations: 0,
+            };
+            for p0 in [-PI, -0.73, 0.0, PI] {
+                for p1 in [-MAX_FIRST_ORDER, -0.51, 0.0, MAX_FIRST_ORDER] {
+                    for kind in 0..3 {
+                        let expected = reference(&values, p0, p1, kind);
+                        let actual = objective.cost(p0, p1, kind).unwrap();
+                        assert!(
+                            (actual - expected).abs() <= 2e-12 * expected.abs().max(1.0),
+                            "n={n} p0={p0} p1={p1} kind={kind}: {actual} != {expected}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn undefined_objectives_and_cancellation_remain_explicit() {
+        let values = [Complex64::new(0.0, 0.0); 65];
+        let token = crate::CancellationToken::new();
+        let mut control = ExecutionContext::default().with_cancellation(token.clone());
+        let mut objective = Objective {
+            values: &values,
+            control: &mut control,
+            evaluations: 0,
+        };
+        for kind in 0..3 {
+            assert_eq!(objective.cost(0.0, 0.0, kind).unwrap(), f64::INFINITY);
+        }
+        token.cancel();
+        assert!(objective.cost(0.0, 0.0, 0).is_err());
+    }
 }

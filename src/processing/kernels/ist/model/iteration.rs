@@ -9,21 +9,25 @@ use std::sync::Arc;
 use super::{ColumnState, IstError, IstInput};
 
 pub(super) fn column_indices(input: &IstInput, f2: usize) -> impl Iterator<Item = usize> + '_ {
-    (0..input.nlogical).flat_map(move |logical| {
-        (0..input.cartesian_fields)
-            .map(move |field| (logical * input.f2_points + f2) * input.cartesian_fields + field)
-    })
+    // Iteration buffers are [F2,N,C], keeping each independent column together.
+    // Within a column retain logical/field order for compensated reductions.
+    let length = input.nlogical * input.cartesian_fields;
+    f2 * length..(f2 + 1) * length
 }
 
 pub(super) fn relative_change(
+    control: &ExecutionContext<'_>,
     input: &IstInput,
     f2: usize,
     next: &[Complex64],
     current: &[Complex64],
-) -> f64 {
+) -> Result<f64, IstError> {
     let mut difference_scale = 0.0_f64;
     let mut current_scale = 0.0_f64;
-    for index in column_indices(input, f2) {
+    for (ordinal, index) in column_indices(input, f2).enumerate() {
+        if ordinal % 4096 == 0 {
+            control.check_cancelled()?;
+        }
         let (next, current) = (next[index], current[index]);
         difference_scale = difference_scale
             .max((next.re - current.re).abs())
@@ -32,7 +36,10 @@ pub(super) fn relative_change(
     }
     let mut difference_sum = ScaledNeumaier::default();
     let mut current_sum = ScaledNeumaier::default();
-    for index in column_indices(input, f2) {
+    for (ordinal, index) in column_indices(input, f2).enumerate() {
+        if ordinal % 4096 == 0 {
+            control.check_cancelled()?;
+        }
         let (next, current) = (next[index], current[index]);
         if difference_scale != 0.0 {
             for value in [next.re - current.re, next.im - current.im] {
@@ -49,7 +56,7 @@ pub(super) fn relative_change(
     }
     let numerator = difference_scale * difference_sum.total().sqrt();
     let denominator = current_scale * current_sum.total().sqrt();
-    numerator / denominator
+    Ok(numerator / denominator)
 }
 
 pub(super) fn scatter_measured(
@@ -64,9 +71,8 @@ pub(super) fn scatter_measured(
                 control.check_cancelled()?;
             }
             for field in 0..input.cartesian_fields {
-                control.check_cancelled()?;
                 let compact = (measured * input.f2_points + f2) * input.cartesian_fields + field;
-                let target = (coordinate * input.f2_points + f2) * input.cartesian_fields + field;
+                let target = (f2 * input.nlogical + coordinate) * input.cartesian_fields + field;
                 dense[target].re = compact_y[compact].re;
                 dense[target].im = compact_y[compact].im;
             }
@@ -95,6 +101,9 @@ pub(super) fn initial_columns(
         gather_lines(control, input, x, f2, lines)?;
         transform_lines(control, input, lines, scratch, forward)?;
         for frequency in 0..input.nlogical {
+            if frequency % 1024 == 0 {
+                control.check_cancelled()?;
+            }
             let rho = scaled_l2((0..input.cartesian_fields).flat_map(|field| {
                 let value = lines[field * input.nlogical + frequency];
                 [value.re, value.im]
@@ -136,7 +145,10 @@ pub(super) fn reconstruct_iteration(
         if column.converged {
             // Freeze a column at its own stopping iteration. A strong neighbor
             // cannot change either its threshold or its convergence decision.
-            for index in column_indices(input, f2) {
+            for (ordinal, index) in column_indices(input, f2).enumerate() {
+                if ordinal % 4096 == 0 {
+                    control.check_cancelled()?;
+                }
                 next[index] = current[index];
             }
             continue;
@@ -145,6 +157,9 @@ pub(super) fn reconstruct_iteration(
         gather_lines(control, input, current, f2, lines)?;
         transform_lines(control, input, lines, scratch, forward)?;
         for frequency in 0..input.nlogical {
+            if frequency % 1024 == 0 {
+                control.check_cancelled()?;
+            }
             let rho = scaled_l2((0..input.cartesian_fields).flat_map(|field| {
                 let value = lines[field * input.nlogical + frequency];
                 [value.re, value.im]
@@ -158,19 +173,20 @@ pub(super) fn reconstruct_iteration(
                 return Err(IstError::NumericalInvariantViolation);
             }
             for field in 0..input.cartesian_fields {
-                control.check_cancelled()?;
                 lines[field * input.nlogical + frequency] *= factor;
             }
         }
         transform_lines(control, input, lines, scratch, inverse)?;
         for (logical, measured) in mask.iter().enumerate() {
+            if logical % 1024 == 0 {
+                control.check_cancelled()?;
+            }
             if *measured != 0 {
                 continue;
             }
             for field in 0..input.cartesian_fields {
-                control.check_cancelled()?;
                 let source = field * input.nlogical + logical;
-                let target = (logical * input.f2_points + f2) * input.cartesian_fields + field;
+                let target = (f2 * input.nlogical + logical) * input.cartesian_fields + field;
                 next[target].re = lines[source].re / input.nlogical as f64;
                 next[target].im = lines[source].im / input.nlogical as f64;
             }
@@ -187,9 +203,11 @@ pub(super) fn gather_lines(
     lines: &mut [Complex64],
 ) -> Result<(), IstError> {
     for logical in 0..input.nlogical {
-        for field in 0..input.cartesian_fields {
+        if logical % 1024 == 0 {
             control.check_cancelled()?;
-            let source = (logical * input.f2_points + f2) * input.cartesian_fields + field;
+        }
+        for field in 0..input.cartesian_fields {
+            let source = (f2 * input.nlogical + logical) * input.cartesian_fields + field;
             let target = field * input.nlogical + logical;
             lines[target] = dense[source];
         }

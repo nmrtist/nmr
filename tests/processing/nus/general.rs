@@ -7,6 +7,81 @@ use nmr::{CancellationToken, ExecutionContext};
 use crate::spectrum_support::*;
 
 #[test]
+fn grouped_columns_match_separate_reconstruction_including_retained_signed_zeros() {
+    // Unequal dimensions, two grouped fields, unsorted observations and a zero
+    // column exercise both transposes and freezing before neighbouring columns.
+    for fields in [1, 2] {
+        let n = 31;
+        let coordinates: Vec<_> = (0..23).map(|i| i * 7 % n).collect();
+        let mut columns = Vec::new();
+        for column in 0..3 {
+            let mut values = Vec::new();
+            for &time in &coordinates {
+                for field in 0..fields {
+                    let z = if column == 1 {
+                        nmr::Complex64::new(-0.0, 0.0)
+                    } else {
+                        nmr::Complex64::from_polar(
+                            (column + field + 1) as f64,
+                            std::f64::consts::TAU * (3 + column + field) as f64 * time as f64
+                                / n as f64,
+                        )
+                    };
+                    values.extend([z.re, z.im]);
+                }
+            }
+            columns.push(values);
+        }
+        let reconstruct = |count, values| {
+            let input = IstInput::with_grid(n, count, fields, coordinates.clone(), values).unwrap();
+            let output = GeneralGridPhaseCovariantGroupRetainedIstV1
+                .reconstruct_with_context(
+                    &input,
+                    IstOptions::new().noiseless(),
+                    &mut ExecutionContext::default(),
+                )
+                .unwrap();
+            for (m, &time) in coordinates.iter().enumerate() {
+                for c in 0..count * fields * 2 {
+                    assert_eq!(
+                        input.components()[m * count * fields * 2 + c].to_bits(),
+                        output.components()[time * count * fields * 2 + c].to_bits()
+                    );
+                }
+            }
+            output
+        };
+        let mut together = Vec::new();
+        for m in 0..coordinates.len() {
+            for column in &columns {
+                together.extend_from_slice(&column[m * fields * 2..(m + 1) * fields * 2]);
+            }
+        }
+        let combined = reconstruct(3, together);
+        for (c, values) in columns.into_iter().enumerate() {
+            let separate = reconstruct(1, values);
+            assert_eq!(combined.column_iterations(c), separate.column_iterations(0));
+            assert_eq!(
+                combined.column_final_threshold(c),
+                separate.column_final_threshold(0)
+            );
+            assert_eq!(
+                combined.column_relative_change(c),
+                separate.column_relative_change(0)
+            );
+            for time in 0..n {
+                for k in 0..fields * 2 {
+                    assert_eq!(
+                        combined.components()[(time * 3 + c) * fields * 2 + k].to_bits(),
+                        separate.components()[time * fields * 2 + k].to_bits()
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn general_ist_accepts_low_signal_columns_without_discarding_observations() {
     // Deterministic impulse: every unnormalised Fourier bin has magnitude 0.01,
     // below the sigma=1 threshold. Soft thresholding gives zero; replacing the

@@ -149,6 +149,10 @@ pub(super) fn reconstruct(
     }
 
     let mut x_next = try_complex_vec(dense_len)?;
+    // Both ping-pong buffers retain measured bits for their entire lifetime.
+    // The map and extrapolation write only missing coordinates, so replacing
+    // the same measured rows on every iteration is unnecessary.
+    scatter_measured(control, input, &compact_y, &mut x_next)?;
     let mut previous = if general {
         try_complex_vec(dense_len)?
     } else {
@@ -179,13 +183,12 @@ pub(super) fn reconstruct(
             &columns,
             column_work,
         )?;
-        scatter_measured(control, input, &compact_y, &mut x_next)?;
         for (f2, column) in columns.iter_mut().enumerate() {
             if column.converged {
                 continue;
             }
             column.iterations += 1;
-            let relative = relative_change(input, f2, &x_next, &x_current);
+            let relative = relative_change(control, input, f2, &x_next, &x_current)?;
             column.relative_change = relative;
             if !relative.is_finite() {
                 return Err(IstError::NumericalInvariantViolation);
@@ -217,7 +220,7 @@ pub(super) fn reconstruct(
                     let actual = x_next[index];
                     // All three arrays carry identical retained samples. Avoid
                     // arithmetic on measured values to preserve signed-zero bits.
-                    let row = index / (input.f2_points * input.cartesian_fields);
+                    let row = ordinal / input.cartesian_fields;
                     if mask[row] == 0 {
                         x_next[index] = actual + (actual - previous[index]) * beta;
                         if !x_next[index].re.is_finite() || !x_next[index].im.is_finite() {
@@ -248,10 +251,16 @@ pub(super) fn reconstruct(
     drop(inverse);
     control.charge(scatter_work)?;
     let mut components = try_f64_vec(dense_len.checked_mul(2).ok_or(IstError::SizeOverflow)?)?;
-    for (index, (target, value)) in components.chunks_exact_mut(2).zip(&x_current).enumerate() {
+    // Transpose back only once, at the public [N,F2,C,2] boundary.
+    for (index, target) in components.chunks_exact_mut(2).enumerate() {
         if index % 4096 == 0 {
             control.check_cancelled()?;
         }
+        let field = index % input.cartesian_fields;
+        let point = index / input.cartesian_fields;
+        let f2 = point % input.f2_points;
+        let logical = point / input.f2_points;
+        let value = x_current[(f2 * input.nlogical + logical) * input.cartesian_fields + field];
         target[0] = value.re;
         target[1] = value.im;
     }
