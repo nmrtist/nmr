@@ -1,0 +1,34 @@
+[package]
+name = "nmr"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Jiekang Tian <jiekangtian@gmail.com>"]
+license = "MIT OR Apache-2.0"
+description = "NMR data tools for Rust"
+repository = "https://github.com/nmrtist/nmr"
+homepage = "https://nmr.nmrtist.space"
+documentation = "https://docs.rs/nmr"
+readme = "README.md"
+include = [
+    "/src/**",
+    "/Cargo.lock",
+    "/build.rs",
+    "/LICENSE-APACHE",
+    "/LICENSE-MIT",
+]
+keywords = ["nmr", "spectroscopy", "bruker", "fid", "spectrum"]
+categories = ["science", "parser-implementations"]
+
+[dependencies]
+num-complex = "0.4"
+rustfft = "=6.4.1"
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+
+[dev-dependencies]
+proptest = "1"
+
+[build-dependencies]
+sha2 = "0.10"
