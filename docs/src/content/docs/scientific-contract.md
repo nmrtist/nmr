@@ -3,7 +3,7 @@ title: Scientific contracts and evidence
 description: Numerical conventions, supported combinations, source rules and independent checks.
 ---
 
-This page defines the numerical meaning of the supported 0.1.1 processing
+This page defines the numerical meaning of the supported processing
 operations. [Format support](/formats/) lists accepted layouts. Acceptance,
 independent source evidence and agreement with a vendor application are separate
 claims; the [source register](#format-rule-sources) below states their coverage.

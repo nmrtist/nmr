@@ -29,7 +29,7 @@ domains. Read the [format matrix](docs/src/content/docs/formats.md) and
 [scientific contract](docs/src/content/docs/scientific-contract.md) before
 relying on a particular layout or inference method.
 
-The project is pre-release (`0.1.1` in this checkout). APIs and development
+The project is pre-release. APIs and development
 snapshots may change in place. The quickstart uses source installation rather
 than assuming registry availability.
 
