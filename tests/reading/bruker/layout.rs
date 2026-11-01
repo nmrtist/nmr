@@ -116,7 +116,7 @@ fn rejects_unverified_bruker_multidimensional_layouts() {
     let error = read_from_parts(&encoded_ser(4, true), &[&acqus, &acqu2s], None).unwrap_err();
     assert_eq!(error.kind(), ReadErrorKind::UnsupportedFeature);
 
-    let (acqus_3d, acqu2s_3d, acqu3s_3d) = three_dimensional_parameters(1);
+    let (acqus_3d, acqu2s_3d, acqu3s_3d) = three_dimensional_parameters(2);
     let error = read_from_parts(
         &encoded_ser(16, true),
         &[&acqus_3d, &acqu2s_3d, &acqu3s_3d],
@@ -327,5 +327,177 @@ fn rejects_invalid_bruker_ser_length_and_schedule() {
         .unwrap_err()
         .kind(),
         ReadErrorKind::InvalidMetadata
+    );
+}
+
+#[test]
+fn three_dimensional_orders_preserve_axis_identity_and_every_component() {
+    for aqseq in [0, 1] {
+        for mode1 in [1, 4, 5, 6] {
+            for mode2 in [1, 4, 5, 6] {
+                for continuous in [false, true] {
+                    let (a, b, c) = three_dimensional_parameters(aqseq);
+                    let a = if continuous {
+                        a
+                    } else {
+                        a.replace("##$GO_block_size= <continuous>\n", "")
+                    };
+                    let b = b
+                        .replace("##$TD= 4", "##$TD= 6")
+                        .replace("##$FnMODE= 6", &format!("##$FnMODE= {mode2}"));
+                    let c = c.replace("##$FnMODE= 5", &format!("##$FnMODE= {mode1}"));
+                    let bytes = encoded_ser(24, continuous);
+                    let raw = read_from_parts(&bytes, &[&a, &b, &c], None).unwrap();
+                    let temp = tempfile::tempdir().unwrap();
+                    for (name, text) in [("acqus", &a), ("acqu2s", &b), ("acqu3s", &c)] {
+                        std::fs::write(temp.path().join(name), text).unwrap();
+                    }
+                    std::fs::write(temp.path().join("ser"), &bytes).unwrap();
+                    let lazy = nmr::raw::OpenOptions::new()
+                        .allow_experimental_vendor_semantics(true)
+                        .open(temp.path())
+                        .unwrap();
+                    let lanes1 = if mode1 == 1 { 1 } else { 2 };
+                    let lanes2 = if mode2 == 1 { 1 } else { 2 };
+                    assert_eq!(
+                        raw.descriptor().logical_shape(),
+                        [4 / lanes1, 6 / lanes2, 2]
+                    );
+                    assert_eq!(lazy.descriptor(), raw.descriptor());
+                    assert_eq!(raw.descriptor().axes()[0].nucleus(), Some("15N"));
+                    assert_eq!(raw.descriptor().axes()[1].nucleus(), Some("13C"));
+                    for f1 in 0..4 / lanes1 {
+                        for f2 in 0..6 / lanes2 {
+                            let trace = raw.data().read_trace(&[f1, f2]).unwrap();
+                            assert_eq!(
+                                lazy.read_trace(&[f1, f2]).unwrap().samples(),
+                                trace.samples()
+                            );
+                            for c1 in 0..lanes1 {
+                                for c2 in 0..lanes2 {
+                                    // Independent disk nesting oracle: 321 versus 312.
+                                    let i = f1 * lanes1 + c1;
+                                    let j = f2 * lanes2 + c2;
+                                    let row = if aqseq == 0 { i * 6 + j } else { j * 4 + i };
+                                    for x in 0..2 {
+                                        let base = (row * 10 + x * 2 + 1) as f64;
+                                        assert_eq!(
+                                            trace.samples()[(c1 * lanes2 + c2) * 2 + x],
+                                            Complex64::new(base, base + 1.0)
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    assert_eq!(
+                        lazy.into_dataset().unwrap().data().dense_samples(),
+                        raw.data().dense_samples()
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Local, read-only verification against an independently indexed little-endian
+/// int32 312 acquisition. No vendor data is stored in the test repository.
+#[test]
+#[ignore = "set NMR_BRUKER_AQSEQ1_DATA to a local Bruker experiment directory"]
+fn local_aqseq1_data_matches_disk_loop_order() {
+    let path = std::path::PathBuf::from(std::env::var_os("NMR_BRUKER_AQSEQ1_DATA").unwrap());
+    let texts =
+        ["acqus", "acqu2s", "acqu3s"].map(|name| std::fs::read_to_string(path.join(name)).unwrap());
+    let params = texts
+        .each_ref()
+        .map(|text| nmr::formats::bruker::ParameterFile::parse(text).unwrap());
+    assert_eq!(params[0].get("AQSEQ"), Some("1"));
+    assert_eq!(params[0].get("DTYPA"), Some("0"));
+    assert_eq!(params[0].get("BYTORDA"), Some("0"));
+    let td: Vec<usize> = params
+        .iter()
+        .map(|p| p.get("TD").unwrap().parse().unwrap())
+        .collect();
+    let bytes = std::fs::read(path.join("ser")).unwrap();
+    let stride = bytes.len() / (td[1] * td[2]);
+    assert!(stride >= td[0] * 4);
+    assert_eq!(stride * td[1] * td[2], bytes.len());
+    let raw = read_from_parts(
+        &bytes,
+        &texts.iter().map(String::as_str).collect::<Vec<_>>(),
+        None,
+    )
+    .unwrap();
+    let reader = nmr::raw::OpenOptions::new()
+        .allow_experimental_vendor_semantics(true)
+        .open(&path)
+        .unwrap();
+    assert_eq!(reader.descriptor(), raw.descriptor());
+    let lanes = raw.descriptor().component_lanes();
+    let shape = raw.descriptor().logical_shape();
+    for f2 in 0..shape[1] {
+        for f1 in 0..shape[0] {
+            let trace = reader.read_trace(&[f1, f2]).unwrap();
+            assert_eq!(
+                trace.samples(),
+                raw.data().read_trace(&[f1, f2]).unwrap().samples()
+            );
+            for c2 in 0..lanes[1] {
+                for c1 in 0..lanes[0] {
+                    // Pulse-program 312 loop order: F1 phase, F1 time,
+                    // F2 phase, F2 time, from innermost to outermost.
+                    let row = ((f2 * lanes[1] + c2) * td[2]) + f1 * lanes[0] + c1;
+                    for x in 0..shape[2] {
+                        let offset = row * stride + x * 8;
+                        let re = i32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+                            as f64;
+                        let im =
+                            i32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap())
+                                as f64;
+                        assert_eq!(
+                            trace.samples()[(c1 * lanes[1] + c2) * shape[2] + x],
+                            Complex64::new(re, im)
+                        );
+                    }
+                }
+            }
+        }
+    }
+    eprintln!(
+        "verified shape={shape:?}, lanes={lanes:?}, stride={stride}, complex samples={}",
+        bytes.len() / 8
+    );
+}
+
+#[test]
+fn three_dimensional_order_validation_agrees_for_memory_and_path_inputs() {
+    for aqseq in [-1, 2, 321] {
+        let (a, b, c) = three_dimensional_parameters(aqseq);
+        let bytes = encoded_ser(16, true);
+        let error = read_from_parts(&bytes, &[&a, &b, &c], None).unwrap_err();
+        assert_eq!(error.kind(), ReadErrorKind::UnsupportedFeature);
+        let temp = tempfile::tempdir().unwrap();
+        for (name, text) in [("acqus", &a), ("acqu2s", &b), ("acqu3s", &c)] {
+            std::fs::write(temp.path().join(name), text).unwrap();
+        }
+        std::fs::write(temp.path().join("ser"), bytes).unwrap();
+        assert_eq!(
+            nmr::raw::OpenOptions::new()
+                .allow_experimental_vendor_semantics(true)
+                .open(temp.path())
+                .unwrap_err()
+                .kind(),
+            error.kind()
+        );
+    }
+    let (a, b, c) = three_dimensional_parameters(0);
+    let bytes = encoded_ser(16, true);
+    let explicit = read_from_parts(&bytes, &[&a, &b, &c], None).unwrap();
+    let a = a.replace("##$AQSEQ= 0\n", "");
+    let default = read_from_parts(&bytes, &[&a, &b, &c], None).unwrap();
+    assert_eq!(explicit.descriptor(), default.descriptor());
+    assert_eq!(
+        explicit.data().dense_samples(),
+        default.data().dense_samples()
     );
 }
