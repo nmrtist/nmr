@@ -29,9 +29,9 @@ domains. Read the [format matrix](docs/src/content/docs/formats.md) and
 [scientific contract](docs/src/content/docs/scientific-contract.md) before
 relying on a particular layout or inference method.
 
-The project is pre-release. APIs and development
-snapshots may change in place. The quickstart uses source installation rather
-than assuming registry availability.
+Install from crates.io with `nmr = "0.1"` in your Cargo dependencies.
+The project is in early development. APIs and development snapshots may change;
+preserve the matching source revision when retaining snapshots.
 
 - [User guide](https://nmr.nmrtist.space/): reading, processing, limits and application integration.
 - [Processing examples](docs/src/content/docs/processing.md): 1D, dense 2D and NUS workflows.

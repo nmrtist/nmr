@@ -34,10 +34,10 @@ domains, not general recovery guarantees. See [scientific evidence](/scientific-
 and the task-specific guides before using inferred results quantitatively.
 Reading supported 3D Bruker data does not imply 3D processing support.
 
-The project is pre-release. APIs and
+The project is in early development. APIs and
 serialized development snapshots may change in place; preserve the matching
-source revision when saving work. The quickstart uses a local dependency and
-does not assume that this revision is published on a registry.
+source revision when saving work. The [quickstart](/getting-started/) covers
+installation and source examples.
 
 ## Build an application or contribute
 

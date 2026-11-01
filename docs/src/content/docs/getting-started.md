@@ -55,8 +55,7 @@ NPZ is a plot exchange format, not a restorable processing project. Use
 
 ## Use the library in your application
 
-This checkout is pre-release. To use exactly the source you just built, create a
-sibling application from the repository root:
+Create a sibling application from the repository root:
 
 ```console
 cd ..
@@ -67,8 +66,11 @@ cd nmr-start
 Add this entry under the existing `[dependencies]` in `nmr-start/Cargo.toml`:
 
 ```toml
-nmr = { path = "../nmr" }
+nmr = "0.1"
 ```
+
+To test unpublished local changes instead, use `nmr = { path = "../nmr" }`.
+The fixture used below comes from the sibling checkout, not the registry package.
 
 Replace `src/main.rs` with:
 
