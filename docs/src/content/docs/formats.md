@@ -27,7 +27,7 @@ component signs, time coordinates and the scope of independent validation.
 
 | Vendor | Accepted input | Supported boundary |
 |---|---|---|
-| Bruker | `fid`/`ser`, acquisition parameter files, optional `nuslist` | 1D; 2D AQSEQ 0 with QF, States, States-TPPI, or Echo/AntiEcho; dense; FnTYPE 2 NUS (experimental opt-in) including repeated observations and zero-padded preallocation; dense 3D AQSEQ 0 with QF, States, States-TPPI, or Echo/AntiEcho on each indirect axis; int32/float64, both byte orders, contiguous or K-block rows |
+| Bruker | `fid`/`ser`, acquisition parameter files, optional `nuslist` | 1D; 2D AQSEQ 0 with QF, States, States-TPPI, or Echo/AntiEcho; dense; FnTYPE 2 NUS (experimental opt-in) including repeated observations and zero-padded preallocation; dense 3D AQSEQ 0 (3-2-1) or 1 (3-1-2) with QF, States, States-TPPI, or Echo/AntiEcho on each indirect axis; int32/float64, both byte orders, contiguous or K-block rows |
 | Bruker | processed `1r`/optional `1i`, or XDIM-tiled 2D processing data | 1D scalar/Cartesian; scalar `2rr`, rectangular `2rr/2ri` or `2rr/2ir`, or full Cartesian quartet `2rr/2ri/2ir/2ii`; int32/float64 and both byte orders; calibrated ppm axes when SW_p, SF, and OFFSET are complete |
 | JEOL (experimental opt-in) | raw Delta JDF | 1D axis types `[1]`/`[3]`; 2D `[3,1]`, `[3,3]`, and `[4,4]`; dense and list-defined NUS on the original grid; float32/float64; declared byte order; implemented tile reorder, component sign, and valid-window crop |
 | JEOL (experimental opt-in) | frequency-domain Delta JDF | 1D `[1]` scalar and `[3]` Cartesian; 2D `[3,1]` parameter series and `[3,3]` Cartesian; declared precision, byte order, and valid-window crop |
@@ -151,7 +151,7 @@ logical lane group; use absolute-grid modulation instead.
 ## Unsupported layouts
 
 Nonrectangular Bruker processed component sets, JCAMP
-LINK/NTUPLES/FID/peak tables, Bruker 3D NUS, 3D AQSEQ other than 0, PARMODE 3+,
+LINK/NTUPLES/FID/peak tables, Bruker 3D NUS, 3D AQSEQ other than 0 or 1, PARMODE 3+,
 other indirect modes, JEOL processed 3D+, JEOL raw 3D+, and ambiguous Varian
 arrays are not supported. Partial header fields never upgrade a layout to
 supported decoding.
@@ -178,3 +178,36 @@ before/after-data record area. Ramp count must agree with the header within
 1e-4 intervals; interpolation preserves stated endpoints when a printed step
 is rounded. Raw record bytes remain available. This is experimental syntax
 coverage, not certification of a JEOL acquisition.
+
+### Bruker 3D acquisition order
+
+Dense 3D imports normalize axes to F1 (`acqu3s`), F2 (`acqu2s`),
+F3 (`acqus`) for both AQSEQ 0 (321) and 1 (312). The stored coordinate
+includes each axis's FnMODE lane: AQSEQ 0 nests F2 inside F1, while
+AQSEQ 1 nests F1 inside F2. Quadrature components retain their logical
+axis identity; changing acquisition order does not exchange nuclei,
+spectral widths, or component transforms. Path opening and in-memory
+imports use the same order validation.
+
+The acquisition-order convention is described in Bruker's
+[Processing Commands and Parameters](https://nmr.chem.ucsb.edu/docs/Bruker_NMR_Manuals/processing-reference_v007.pdf)
+under 3D processing and AQSEQ. Regression tests use unequal indirect
+sizes and distinct sample values for every coordinate and component,
+covering both orders and all supported FnMODE combinations. An opt-in
+`local_aqseq1_data_matches_disk_loop_order` test compares local int32
+little-endian acquisitions against an independent disk-index oracle;
+set `NMR_BRUKER_AQSEQ1_DATA` and run it with `--ignored`.
+This verifies raw sample placement, not equality to vendor processed spectra.
+
+Independent reference validation on two local AQSEQ 1 acquisitions with
+States-TPPI on both indirect axes compared all raw traces and quadrature
+components against NMRPipe 13.0 conversion. Each acquisition had logical
+shape [32, 32, 512] and component lanes [2, 2, 1]: all 4,194,304 scalar
+comparisons per acquisition had zero difference. NMRPipe stores float32;
+all source int32 values in these acquisitions were exactly representable
+at that precision. Full int32-to-f64 disk-index checks also passed.
+No digital-filter correction, windowing, Fourier transform, phase adjustment,
+truncation, or zero filling was applied. This evidence covers raw conversion
+for these two acquisitions, not fully processed spectra, processing phase
+conventions, or other acquisition orders. Real-data files and generated
+reference outputs are not distributed with the repository.

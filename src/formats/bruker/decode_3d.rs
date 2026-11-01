@@ -59,18 +59,6 @@ pub(crate) fn decode_three_dimensional(
             "three-dimensional Bruker FnTYPE must be traditional (0)",
         ));
     }
-    if direct
-        .optional_integer("AQSEQ", direct_source)?
-        .unwrap_or(0)
-        != 0
-    {
-        return Err(ReadError::unsupported_feature(
-            direct_source.clone(),
-            crate::raw::UnsupportedFeatureCode::NON_SEPARABLE_COMPONENT_LAYOUT,
-            None,
-            vec!["only Bruker 3D AQSEQ=0 (3-2-1) has a proven separable mapping".to_owned()],
-        ));
-    }
     let (fast_components, fast_lanes) = indirect_layout(
         fast.integer("FnMODE", fast_source)?,
         AxisIndex::new(1),
@@ -83,6 +71,8 @@ pub(crate) fn decode_three_dimensional(
     )?;
     let stored_fast = indirect_stored_points(fast, fast_source, fast_lanes)?;
     let stored_slow = indirect_stored_points(slow, slow_source, slow_lanes)?;
+    let row_strides =
+        super::layout::three_dimensional_strides(direct, direct_source, stored_slow, stored_fast)?;
     let storage = direct_storage(direct, direct_source)?;
     let direct_points = storage.td / 2;
     let payload_bytes = storage
@@ -116,9 +106,12 @@ pub(crate) fn decode_three_dimensional(
     ensure_decode_limit(decoded_bytes, options)?;
     let mut samples = vec![Complex64::default(); decoded_samples];
     for row in 0..rows {
+        let stored_f1 = row / stored_fast;
+        let stored_f2 = row % stored_fast;
+        let source_row = stored_f1 * row_strides[0] + stored_f2 * row_strides[1];
         decode_ser_row(
             ser,
-            row,
+            source_row,
             stride,
             payload_bytes,
             storage,

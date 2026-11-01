@@ -72,7 +72,7 @@ impl TraceReader {
         stride: usize,
         payload_bytes: usize,
         direct_points: usize,
-        stored_second_indirect: usize,
+        row_strides: [usize; 2],
         slow_lanes: usize,
         fast_lanes: usize,
     ) -> Result<Vec<Complex64>, ReadError> {
@@ -100,8 +100,12 @@ impl TraceReader {
                     .and_then(|value| value.checked_add(fast_lane))
                     .ok_or(ReadError::SizeOverflow)?;
                 let row = stored_slow
-                    .checked_mul(stored_second_indirect)
-                    .and_then(|value| value.checked_add(stored_fast))
+                    .checked_mul(row_strides[0])
+                    .and_then(|value| {
+                        stored_fast
+                            .checked_mul(row_strides[1])
+                            .and_then(|fast| value.checked_add(fast))
+                    })
                     .ok_or(ReadError::SizeOverflow)?;
                 let offset = row.checked_mul(stride).ok_or(ReadError::SizeOverflow)?;
                 let bytes = self
@@ -228,7 +232,7 @@ impl TraceSource for TraceReader {
                 stride,
                 payload_bytes,
                 direct_points,
-                stored_second_indirect,
+                row_strides,
                 slow_lanes,
                 fast_lanes,
             } => self.read_three_dimensional_trace(
@@ -237,7 +241,7 @@ impl TraceSource for TraceReader {
                 *stride,
                 *payload_bytes,
                 *direct_points,
-                *stored_second_indirect,
+                *row_strides,
                 *slow_lanes,
                 *fast_lanes,
             ),

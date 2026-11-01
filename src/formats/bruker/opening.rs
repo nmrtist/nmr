@@ -507,20 +507,6 @@ pub(crate) fn open_resolved_acquisition_inner(
                     "three-dimensional Bruker FnTYPE must be traditional (0)",
                 ));
             }
-            if parameter_files[0]
-                .optional_integer("AQSEQ", direct_path)?
-                .unwrap_or(0)
-                != 0
-            {
-                return Err(ReadError::unsupported_feature(
-                    direct_path.clone().into(),
-                    crate::raw::UnsupportedFeatureCode::NON_SEPARABLE_COMPONENT_LAYOUT,
-                    None,
-                    vec![
-                        "only Bruker 3D AQSEQ=0 (3-2-1) has a proven separable mapping".to_owned(),
-                    ],
-                ));
-            }
             let fast_path = &resolved.parameter_files[1];
             let slow_path = &resolved.parameter_files[2];
             let fast = &parameter_files[1];
@@ -537,6 +523,12 @@ pub(crate) fn open_resolved_acquisition_inner(
             )?;
             let stored_fast = indirect_stored_points(fast, fast_path, fast_lanes)?;
             let stored_slow = indirect_stored_points(slow, slow_path, slow_lanes)?;
+            let row_strides = super::layout::three_dimensional_strides(
+                &parameter_files[0],
+                &direct_path.clone().into(),
+                stored_slow,
+                stored_fast,
+            )?;
             let storage = direct_storage(&parameter_files[0], direct_path)?;
             let direct_points = storage.td / 2;
             let payload_bytes = storage
@@ -612,7 +604,7 @@ pub(crate) fn open_resolved_acquisition_inner(
                     stride,
                     payload_bytes,
                     direct_points,
-                    stored_second_indirect: stored_fast,
+                    row_strides,
                     slow_lanes,
                     fast_lanes,
                 },
