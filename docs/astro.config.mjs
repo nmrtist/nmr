@@ -38,6 +38,7 @@ export default defineConfig({
             { label: 'Processing contracts', link: '/processing-reference/' },
             { label: 'Errors and resource limits', link: '/errors-limits/' },
             { label: 'Scientific contracts and evidence', link: '/scientific-contract/' },
+            { label: '2D background diagnostics', link: '/background-diagnostics/' },
             { label: 'Execution reports and comparison', link: '/reproducibility/' },
           ],
         },

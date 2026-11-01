@@ -113,3 +113,43 @@ impl SpectrumReference {
         Ok(value)
     }
 }
+
+impl super::ProcessedDataset {
+    /// Whether retained applied history contains a modulus operation, including
+    /// processed ancestors. This is conservative evidence against the Gaussian
+    /// phase-sensitive model, not proof of the current sample signs. False means
+    /// no such operation was found, not that phase-sensitive representation is known.
+    pub fn has_magnitude_history(&self) -> bool {
+        use crate::processing::{Projection, ResolvedOperation, SpectrumOperation};
+        use crate::{derivation::DerivationInput, processed::ProcessedOrigin};
+        let mut pending = vec![self.provenance()];
+        while let Some(provenance) = pending.pop() {
+            if provenance.history().is_some_and(|history| {
+                history.records().iter().any(|record| {
+                    matches!(
+                        record.resolved(),
+                        Some(ResolvedOperation::Spectrum(SpectrumOperation::Magnitude))
+                            | Some(ResolvedOperation::Projection {
+                                projection: Projection::Magnitude,
+                                ..
+                            })
+                    )
+                })
+            }) {
+                return true;
+            }
+            match provenance.origin() {
+                ProcessedOrigin::Library(boundary) => {
+                    for input in boundary.inputs() {
+                        if let DerivationInput::Processed(parent) = input {
+                            pending.push(parent.provenance());
+                        }
+                    }
+                }
+                ProcessedOrigin::External(boundary) => pending.push(boundary.parent().provenance()),
+                _ => {}
+            }
+        }
+        false
+    }
+}
