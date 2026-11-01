@@ -122,7 +122,7 @@ delivery logs or private-data timings as current support claims.
 
 ## Pre-release changes
 
-This project has not been released. APIs, algorithm identifiers and snapshot
+This project is in early development. APIs, algorithm identifiers and snapshot
 schemas can evolve in place; development snapshots have no backward-compatibility
 or migration guarantee. Document the current behavior and update affected
 examples and tests when changing it. Preserve matching source when retaining
