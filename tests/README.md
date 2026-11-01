@@ -9,6 +9,7 @@ remain beside the implementation in `src/`.
 | --- | --- |
 | `data_model` | Raw/processed structure, coordinates, chemical-shift references, identity, ownership and data access |
 | `reading` | Format selection, Bruker/JEOL/Varian/JCAMP-DX readers, source provenance, layout fixtures and malformed inputs |
+| `background` | Final 2D background calibration, contamination failures and dense processing-chain evidence |
 | `processing` | Processing methods, parameter/state contracts, scientific accuracy, preflight, history and replay |
 | `snapshot` | Snapshot validation, current v1 wire fixtures, recorded environments and offline restoration |
 | `execution` | Cancellation, progress, shared resource accounting and execution-report JSON |

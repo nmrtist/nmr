@@ -43,3 +43,5 @@ pub use methods::nus::{
 pub use methods::phase::{PhaseEstimate, PreparedPhaseEstimate};
 pub use policy::{DenseAxisConfig, DensePipeline, DensePipelineError, DensePipelineOptions};
 pub use prepare::plan::{PreparedPlan, PreparedRawPlan, ProcessingInput, ProcessingPlan};
+
+pub use methods::background;
