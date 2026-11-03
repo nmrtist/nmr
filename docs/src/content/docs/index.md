@@ -24,7 +24,7 @@ Support depends on the acquisition layout, not just the vendor or extension.
 | Task | Current capability |
 | --- | --- |
 | Read data | Supported raw Bruker, JEOL and Varian layouts; processed Bruker, JEOL and scalar 1D JCAMP-DX. Lazy trace/region access is available for raw data. |
-| Process dense data | Explicit rank-1/rank-2 plans: windows, zero filling, FFT, component decoding, phase, reference and spectrum operations. Reading does not run processing. |
+| Process dense data | Explicit rank-1 through rank-3 plans: windows, zero filling, FFT, component decoding, phase, reference and spectrum operations. Reading does not run processing. |
 | Reconstruct NUS | Separate explicit-noise and automatic-noise adapters; dense plans reject sparse input. Repeated observations can be read but cannot be reconstructed by these adapters. |
 | Save results | NPZ for plotting; execution reports for evidence; snapshots for offline continuation with the matching implementation. |
 
@@ -32,7 +32,9 @@ All JEOL reads and Bruker NUS require an **experimental vendor-semantics opt-in*
 Automatic phase, baseline and reconstruction methods have bounded validation
 domains, not general recovery guarantees. See [scientific evidence](/scientific-contract/)
 and the task-specific guides before using inferred results quantitatively.
-Reading supported 3D Bruker data does not imply 3D processing support.
+Dense 3D Bruker processing requires an explicit plan. Automatic recipes,
+NUS reconstruction, and Bruker processed-spectrum reading remain limited to
+their documented ranks.
 
 The project is in early development. APIs and
 serialized development snapshots may change in place; preserve the matching

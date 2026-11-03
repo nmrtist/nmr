@@ -27,9 +27,9 @@ impl RawCapabilities {
     pub fn rank(&self) -> usize {
         self.rank
     }
-    /// Returns whether this input is dense and rank one or two.
+    /// Returns whether this input is dense and rank one through three.
     pub fn supports_dense_processing(&self) -> bool {
-        self.dense && (1..=2).contains(&self.rank)
+        self.dense && (1..=3).contains(&self.rank)
     }
     /// Returns whether one axis has a canonical chemical-shift reference.
     pub fn has_ppm_reference(&self, axis: usize) -> bool {

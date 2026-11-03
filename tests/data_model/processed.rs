@@ -43,7 +43,7 @@ fn processed_component_counts_are_derived_from_basis_without_algorithm_rank_limi
 }
 
 #[test]
-fn processed_nd_tensors_preserve_component_addressing_but_processing_rejects_rank() {
+fn processed_nd_tensors_preserve_component_addressing_and_apply_rank_limits() {
     use nmr::processed::{ProcessedData, ProcessedDataset, ProcessedOrigin, ProcessedProvenance};
     use nmr::processing::{
         FourierTransform, ProcessingError, ProcessingOperation, ProcessingOptions, ProcessingPlan,
@@ -122,18 +122,21 @@ fn processed_nd_tensors_preserve_component_addressing_but_processing_rejects_ran
             },
         ] {
             let plan = ProcessingPlan::new(vec![operation]).unwrap();
-            // The capability error precedes numerical allocation and output limits.
-            assert_eq!(
-                plan.apply_processed_with_options(
+            let error = plan
+                .apply_processed_with_options(
                     &dataset,
                     ProcessingOptions::new()
                         .max_output_bytes(0)
-                        .max_working_bytes(0)
+                        .max_working_bytes(0),
                 )
                 .unwrap_err()
-                .into_root_cause(),
-                ProcessingError::UnsupportedRank { rank: shape.len() }
-            );
+                .into_root_cause();
+            if shape.len() == 3 {
+                assert!(matches!(error, ProcessingError::LimitExceeded(_)));
+            } else {
+                // The rank error precedes numerical allocation and output limits.
+                assert_eq!(error, ProcessingError::UnsupportedRank { rank: 4 });
+            }
         }
     }
 }

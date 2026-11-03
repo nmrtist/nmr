@@ -75,23 +75,24 @@ fn preflight_is_final_authority_for_rank_and_dense_sampling() {
         )
         .unwrap()
     };
-    let rank_three = raw_dataset(
+    let rank_four = raw_dataset(
         vec![
+            indirect(),
             indirect(),
             indirect(),
             direct_axis(AxisDomain::Time, DirectSamples::Complex, 2, 0.0, 0.5),
         ],
-        vec![Complex64::default(); 8],
+        vec![Complex64::default(); 16],
     );
     let plan = ProcessingPlan::new(vec![zero_fill_operation(2, 4)]).unwrap();
     assert_eq!(
         plan.preflight_raw(
-            &ProcessingInput::from_dataset(&rank_three).unwrap(),
+            &ProcessingInput::from_dataset(&rank_four).unwrap(),
             ProcessingOptions::default(),
         )
         .unwrap_err()
         .into_root_cause(),
-        ProcessingError::UnsupportedRank { rank: 3 }
+        ProcessingError::UnsupportedRank { rank: 4 }
     );
 
     let coordinates = vec![nmr::raw::SamplingCoordinate::new(vec![0])];

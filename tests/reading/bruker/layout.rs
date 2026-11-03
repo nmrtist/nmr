@@ -501,3 +501,156 @@ fn three_dimensional_order_validation_agrees_for_memory_and_path_inputs() {
         default.data().dense_samples()
     );
 }
+
+#[test]
+fn dense_3d_signed_tones_preserve_axis_order_and_tppi_parity() {
+    use nmr::processing::{
+        FourierExponentSign, FourierTransform, FrequencyFrame, PolarityState, Projection,
+        ReferenceSource,
+    };
+    use std::f64::consts::TAU;
+
+    let (a, b, c) = three_dimensional_parameters(0);
+    let a = a
+        .replace("##$TD= 4\n", "##$TD= 16\n")
+        .replace("##$DTYPA= 0", "##$DTYPA= 2");
+    for mode in [5, 6] {
+        let b = b
+            .replace("##$TD= 4\n", "##$TD= 8\n")
+            .replace("##$FnMODE= 6", &format!("##$FnMODE= {mode}"));
+        let tone = |n, k, size| Complex64::from_polar(1.0, TAU * (n * k) as f64 / size as f64);
+        let component = |z: Complex64, lane| if lane == 0 { z.re } else { z.im };
+        let mut bytes = Vec::new();
+        for row1 in 0..4 {
+            for row2 in 0..8 {
+                for n3 in 0..8 {
+                    let mut sample = Complex64::default();
+                    for ([k1, k2, k3], amplitude) in [([1, 1, 2], 2.0), ([0, 3, 1], -1.0)] {
+                        let z2 = tone(row2 / 2, k2, 4);
+                        let fast_lane = if mode == 5 {
+                            Complex64::new(component(z2, row2 % 2), 0.0)
+                        } else {
+                            // For Echo/AntiEcho, C = i(E + A), S = A - E.
+                            let sign = if row2 % 2 == 0 { -1.0 } else { 1.0 };
+                            Complex64::new(sign * z2.im / 2.0, -z2.re / 2.0)
+                        };
+                        sample += tone(n3, k3, 8)
+                            * (amplitude * component(tone(row1 / 2, k1, 2), row1 % 2))
+                            * fast_lane;
+                    }
+                    if (row1 / 2 + if mode == 5 { row2 / 2 } else { 0 }) % 2 == 1 {
+                        sample = -sample;
+                    }
+                    bytes.extend(sample.re.to_le_bytes());
+                    bytes.extend(sample.im.to_le_bytes());
+                }
+            }
+        }
+        let raw = read_from_parts(&bytes, &[&a, &b, &c], None).unwrap();
+        let mut operations = vec![
+            ProcessingOperation::ComponentTransform { axis: 0 },
+            ProcessingOperation::ComponentTransform { axis: 1 },
+        ];
+        operations.extend(
+            (0..3)
+                .rev()
+                .map(|axis| ProcessingOperation::FourierTransform {
+                    axis,
+                    transform: FourierTransform::new(FourierExponentSign::Negative),
+                }),
+        );
+        operations.extend(
+            (0..3).map(|axis| ProcessingOperation::ResolveFrequencyFrame {
+                axis,
+                frame: FrequencyFrame::Ppm(ReferenceSource::AxisEvidence),
+            }),
+        );
+        operations.push(ProcessingOperation::Projection {
+            projection: Projection::Real,
+            polarity: PolarityState::Ambiguous180,
+        });
+        let out = ProcessingPlan::new(operations)
+            .unwrap()
+            .apply_raw(&raw)
+            .unwrap();
+        for (position, ppm) in [
+            ([0, 3, 6], [0.0, 24.5, 9.7]),
+            ([1, 1, 5], [20.0, 19.5, 7.2]),
+        ] {
+            for (axis, (index, expected)) in out
+                .descriptor()
+                .axes()
+                .iter()
+                .zip(position.into_iter().zip(ppm))
+            {
+                assert!((axis.coordinate(index).unwrap() - expected).abs() < 1e-10);
+            }
+        }
+        let replayed = out
+            .provenance()
+            .history()
+            .unwrap()
+            .replay_raw(&raw, nmr::processing::ProcessingOptions::new())
+            .unwrap();
+        assert_eq!(replayed.descriptor(), out.descriptor());
+        assert_eq!(replayed.data().samples(), out.data().samples());
+
+        let dataset = nmr::Dataset::from(out.clone());
+        let region = nmr::data::Region::new([0, 0, 6], [2, 4, 1]).unwrap();
+        let slice = dataset
+            .read_region(&region, nmr::resource::MemoryLimits::new())
+            .unwrap();
+        let slice = slice.as_processed().unwrap();
+        assert_eq!(slice.shape(), &[2, 4, 1]);
+        for (i, sample) in slice.samples().iter().enumerate() {
+            let expected = if i == 3 { 128.0 } else { 0.0 };
+            assert!((sample - expected).abs() < 1e-10);
+        }
+        for i in 0..2 {
+            for j in 0..4 {
+                for k in 0..8 {
+                    let expected = match [i, j, k] {
+                        [0, 3, 6] => 128.0,
+                        [1, 1, 5] => -64.0,
+                        _ => 0.0,
+                    };
+                    assert!(
+                        (out.data().get(&[i, j, k], &[0, 0, 0]).unwrap() - expected).abs() < 1e-10
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn dense_3d_component_transform_limits_count_spectator_lanes() {
+    use nmr::processing::{ProcessingError, ProcessingInput, ProcessingOptions};
+
+    let (a, b, c) = three_dimensional_parameters(0);
+    let raw = read_from_parts(&encoded_ser(16, true), &[&a, &b, &c], None).unwrap();
+    assert_eq!(raw.data().shape(), &[2, 2, 2]);
+    let input = ProcessingInput::from_dataset(&raw).unwrap();
+    // Eight logical points, two input lanes, two spectator lanes, and a
+    // complex direct basis: 64 work units per transform.
+    let limit = |work| ProcessingOptions::new().max_transform_work(work);
+    for axis in [0, 1] {
+        let plan =
+            ProcessingPlan::new(vec![ProcessingOperation::ComponentTransform { axis }]).unwrap();
+        let error = plan.preflight_raw(&input, limit(63)).unwrap_err();
+        assert!(matches!(error.root_cause(), ProcessingError::WorkLimit));
+
+        let out = plan.apply_raw_with_options(&raw, limit(64)).unwrap();
+        let history = out.provenance().history().unwrap();
+        let error = history.replay_raw(&raw, limit(63)).unwrap_err();
+        assert!(matches!(error.root_cause(), ProcessingError::WorkLimit));
+        assert_eq!(
+            history
+                .replay_raw(&raw, limit(64))
+                .unwrap()
+                .data()
+                .samples(),
+            out.data().samples()
+        );
+    }
+}

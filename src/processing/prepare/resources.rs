@@ -208,7 +208,7 @@ pub(in crate::processing) fn reserve_prepared(
     requested: bool,
     mut options: ProcessingOptions,
 ) -> Result<ProcessingOptions, ProcessingError> {
-    if !(1..=2).contains(&rank) {
+    if !(1..=3).contains(&rank) {
         return Err(ProcessingError::UnsupportedRank { rank });
     }
     options.prepared_bytes = prepared_retained_bytes(rank, steps, requested)?;
@@ -225,8 +225,8 @@ pub(in crate::processing) struct AxisStorage {
 
 pub(in crate::processing) fn raw_axis_storage(
     axes: &[crate::raw::RawAxis],
-) -> Result<[AxisStorage; 2], ProcessingError> {
-    let mut storage = [AxisStorage::default(); 2];
+) -> Result<[AxisStorage; 3], ProcessingError> {
+    let mut storage = [AxisStorage::default(); 3];
     if axes.len() > storage.len() {
         return Err(ProcessingError::UnsupportedRank { rank: axes.len() });
     }
@@ -243,8 +243,8 @@ pub(in crate::processing) fn raw_axis_storage(
 
 pub(in crate::processing) fn axis_storage<'a>(
     axes: impl Iterator<Item = &'a ProcessedAxis>,
-) -> Result<[AxisStorage; 2], ProcessingError> {
-    let mut storage = [AxisStorage::default(); 2];
+) -> Result<[AxisStorage; 3], ProcessingError> {
+    let mut storage = [AxisStorage::default(); 3];
     for (index, axis) in axes.enumerate() {
         let slot = storage
             .get_mut(index)
@@ -260,7 +260,7 @@ pub(in crate::processing) fn axis_storage<'a>(
 }
 
 pub(in crate::processing) fn axis_reservation<'a>(
-    mut axes: [AxisStorage; 2],
+    mut axes: [AxisStorage; 3],
     operations: impl Iterator<Item = &'a ProcessingOperation>,
     raw_baseline: bool,
 ) -> Result<usize, ProcessingError> {
@@ -268,6 +268,7 @@ pub(in crate::processing) fn axis_reservation<'a>(
         axes[0]
             .bytes
             .checked_add(axes[1].bytes)
+            .and_then(|bytes| bytes.checked_add(axes[2].bytes))
             .ok_or(ProcessingError::SizeOverflow)?
     } else {
         0
@@ -580,7 +581,7 @@ pub(in crate::processing) fn validate_processing_axes(
 ) -> Result<(), ProcessingError> {
     let axes = dataset.descriptor().axes();
     let rank = axes.len();
-    if !(1..=2).contains(&rank) {
+    if !(1..=3).contains(&rank) {
         return Err(ProcessingError::UnsupportedRank { rank });
     }
     if let Some(axis) = axes[..rank - 1]

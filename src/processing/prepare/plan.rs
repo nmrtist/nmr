@@ -231,7 +231,7 @@ impl ProcessingPlan {
                 .map_or(0, |_| input.descriptor.axes()[0].points()),
             options,
         )?;
-        if !(1..=2).contains(&rank) {
+        if !(1..=3).contains(&rank) {
             return Err(ProcessingError::UnsupportedRank { rank });
         }
         if !input.dense {
@@ -276,7 +276,7 @@ impl ProcessingPlan {
         self.apply_with_context(input, options, &mut ExecutionContext::default())
     }
 
-    /// Expands and processes a dense rank-1 or rank-2 raw dataset.
+    /// Expands and processes a dense rank-1 through rank-3 raw dataset.
     pub fn apply_raw(&self, raw: &RawDataset) -> Result<ProcessedDataset, ProcessingError> {
         self.apply_raw_with_options(raw, ProcessingOptions::default())
     }
@@ -650,7 +650,7 @@ pub(in crate::processing) fn preflight(
             let resolved = transition(&mut state, operation)?;
             let after = state.descriptor()?;
             check_working_limit(&before, &after, operation.axis(), &resolved, options)?;
-            check_transform_work(&before, &resolved, options)?;
+            check_transform_work(&before, operation.axis(), &resolved, options)?;
             Ok(PreparedStep {
                 step_index,
                 axis: operation.axis(),
@@ -687,6 +687,7 @@ pub(in crate::processing) fn preflight(
 
 pub(in crate::processing) fn check_transform_work(
     before: &ProcessedDescriptor,
+    axis: Option<usize>,
     resolved: &ResolvedOperation,
     options: ProcessingOptions,
 ) -> Result<(), ProcessingError> {
@@ -698,8 +699,25 @@ pub(in crate::processing) fn check_transform_work(
                 value.checked_mul(axis.points() as u128)
             })
             .ok_or(ProcessingError::SizeOverflow)?;
+        let axes = before.axes();
+        let target = axis
+            .filter(|&axis| axis < axes.len().saturating_sub(1))
+            .ok_or(ProcessingError::Mapping(
+                "component transform requires an indirect axis",
+            ))?;
+        // Each other indirect component lane runs a separate transform.
+        // The factor of two below already accounts for the direct complex basis.
+        let spectator_lanes = axes[..axes.len() - 1]
+            .iter()
+            .enumerate()
+            .filter(|&(axis, _)| axis != target)
+            .try_fold(1u128, |count, (_, axis)| {
+                count.checked_mul(axis.component_count() as u128)
+            })
+            .ok_or(ProcessingError::SizeOverflow)?;
         let work = logical
             .checked_mul(transform.input_lanes() as u128)
+            .and_then(|value| value.checked_mul(spectator_lanes))
             .and_then(|value| value.checked_mul(2))
             .ok_or(ProcessingError::SizeOverflow)?;
         if work > options.max_transform_work {
