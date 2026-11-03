@@ -8,9 +8,9 @@ explains the contracts needed when constructing or inspecting a plan.
 
 ## Supported inputs
 
-`ProcessingPlan` applies an explicit sequence to dense rank-1 or rank-2 data.
+`ProcessingPlan` applies an explicit sequence to dense rank-1 through rank-3 data.
 The processed descriptor and component tensor themselves support N-D data;
-rank-3 and higher processing requests return `UnsupportedRank` before numerical
+rank-4 and higher processing requests return `UnsupportedRank` before numerical
 execution. Declared raw lineage can select or permute source axes. A direct
 acquisition role may appear anywhere in a processed descriptor, but current
 processing requires that role, when present, to occupy the fastest axis.

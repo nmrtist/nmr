@@ -172,9 +172,9 @@ pub(crate) fn replay_raw_history(
             axis: None,
         });
     }
-    if !(1..=2).contains(&raw.descriptor().axes().len()) || !input.dense {
+    if !(1..=3).contains(&raw.descriptor().axes().len()) || !input.dense {
         return Err(ProcessingError::Mapping(
-            "history replay requires dense rank-1 or rank-2 raw input",
+            "history replay requires dense rank-1 through rank-3 raw input",
         ));
     }
     if !input.strong_source_identity {
@@ -241,7 +241,15 @@ pub(crate) fn replay_raw_history(
                 resolved,
                 options,
             )?;
-            check_transform_work(input_descriptor, resolved, options)?;
+            check_transform_work(
+                input_descriptor,
+                match requested.target() {
+                    OperationTarget::Axis(axis) => Some(axis),
+                    _ => None,
+                },
+                resolved,
+                options,
+            )?;
             steps.push(PreparedStep {
                 step_index,
                 axis: match requested.target() {
@@ -404,7 +412,15 @@ pub(crate) fn replay_processed_history(
                 resolved,
                 options,
             )?;
-            check_transform_work(input_descriptor, resolved, options)?;
+            check_transform_work(
+                input_descriptor,
+                match requested.target() {
+                    OperationTarget::Axis(axis) => Some(axis),
+                    _ => None,
+                },
+                resolved,
+                options,
+            )?;
             steps.push(PreparedStep {
                 step_index,
                 axis: match requested.target() {

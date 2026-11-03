@@ -27,9 +27,20 @@ pub(super) fn component_transform(
             return Err(invalid("requires a resolved component transform"));
         };
         let transform = transform.clone();
-        if rank != 2 || axis_index != 0 || !direct_cartesian {
+        if !(2..=3).contains(&rank) || axis_index >= rank - 1 || !direct_cartesian {
             return Err(invalid(
                 "component transform requires a Cartesian direct axis",
+            ));
+        }
+        if rank == 3
+            && transform.transform().modulation().period() > 1
+            && matches!(
+                transform.transform().modulation().domain(),
+                crate::acquisition::ModulationIndexDomain::ObservationOrdinal
+            )
+        {
+            return Err(invalid(
+                "rank-three component transforms require grid or constant modulation",
             ));
         }
         axis_state.axis = rebuild_axis(

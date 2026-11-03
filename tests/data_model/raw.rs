@@ -192,7 +192,7 @@ fn capabilities_are_derived_from_descriptor_and_correction_state() {
 }
 
 #[test]
-fn rank_three_raw_is_valid_but_dense_processing_capability_is_false() {
+fn rank_three_raw_reports_dense_processing_capability() {
     let indirect = || {
         RawAxis::new(
             RawAxisKind::Indirect(IndirectComponents::Scalar),
@@ -211,7 +211,7 @@ fn rank_three_raw_is_valid_but_dense_processing_capability_is_false() {
     .dense(vec![Complex64::default(); 8])
     .unwrap();
     assert_eq!(dataset.capabilities().rank(), 3);
-    assert!(!dataset.capabilities().supports_dense_processing());
+    assert!(dataset.capabilities().supports_dense_processing());
 }
 
 #[test]

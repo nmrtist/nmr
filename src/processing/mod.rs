@@ -1,4 +1,4 @@
-//! Bounded, history-bearing minimal processing for dense rank-1 and rank-2 data.
+//! Bounded, history-bearing minimal processing for dense rank-1 through rank-3 data.
 //!
 //! Explicit deterministic operations provide the supported processing workflow.
 //! ACME (`NormalizedAcmeV1`), AsLS (`PositivePeaksV1`), IST and

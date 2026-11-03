@@ -66,74 +66,92 @@ pub(in crate::processing) fn apply_component_transform(
     observation_ordinals: Option<&[usize]>,
     grid_origin: i64,
 ) -> Result<Vec<f64>, ProcessingError> {
-    if step.before.axes().len() != 2
-        || step.axis() != 0
+    let rank = step.before.axes().len();
+    let axis = step.axis();
+    if !(2..=3).contains(&rank)
+        || axis >= rank - 1
         || !matches!(
-            step.before.axes()[1].component_basis(),
+            step.before.axes()[rank - 1].component_basis(),
             ComponentBasis::Cartesian
         )
     {
         return Err(ProcessingError::Mapping(
-            "component transform requires a rank-2 input with Cartesian direct samples",
+            "component transform requires an indirect axis and Cartesian direct samples",
         ));
     }
     let shape = step.before.logical_shape();
+    let count = checked_product(&shape)?;
     let output_len = checked_product(&storage_shape(&step.after)?)?;
     let mut output = try_zeroed(output_len)?;
     let lanes = resolved.input_lanes();
-    let mut input = Vec::new();
-    input
-        .try_reserve_exact(lanes)
-        .map_err(|_| ProcessingError::AllocationFailure)?;
-    for indirect in 0..shape[0] {
-        for direct in 0..shape[1] {
-            control.charge((lanes as u128) * 2)?;
-            let logical = [indirect, direct];
-            input.clear();
-            for lane in 0..lanes {
-                input.push(Complex64::new(
-                    tensor_sample(current, &step.before, &logical, &[lane, 0])?,
-                    tensor_sample(current, &step.before, &logical, &[lane, 1])?,
-                ));
-            }
-            let modulation_index = match resolved.transform().modulation().domain() {
-                ModulationIndexDomain::AbsoluteGridCoordinate(axis) => {
-                    let value = *logical.get(axis.index()).ok_or(ProcessingError::Mapping(
+    let mut input = try_vec_capacity(lanes)?;
+    let spectator = (rank == 3).then(|| 1 - axis);
+    let spectator_lanes = spectator.map_or(1, |i| step.before.axes()[i].component_count());
+    for index in 0..count {
+        let mut coordinates = [0; 3];
+        let mut remaining = index;
+        for (axis, &size) in shape.iter().enumerate().rev() {
+            coordinates[axis] = remaining % size;
+            remaining /= size;
+        }
+        let logical = &coordinates[..rank];
+        let mut components = [0; 3];
+        let components = &mut components[..rank];
+        let modulation_index = match resolved.transform().modulation().domain() {
+            ModulationIndexDomain::AbsoluteGridCoordinate(referenced) => {
+                let value = *logical
+                    .get(referenced.index())
+                    .ok_or(ProcessingError::Mapping(
                         "component modulation axis is outside the descriptor",
                     ))?;
-                    grid_origin
-                        .checked_add(
-                            i64::try_from(value).map_err(|_| ProcessingError::SizeOverflow)?,
-                        )
-                        .ok_or(ProcessingError::SizeOverflow)?
-                }
-                ModulationIndexDomain::ObservationOrdinal => i64::try_from(
-                    observation_ordinals
-                        .and_then(|mapping| mapping.get(indirect))
-                        .copied()
-                        .unwrap_or(indirect),
-                )
-                .map_err(|_| ProcessingError::SizeOverflow)?,
-            };
+                grid_origin
+                    .checked_add(i64::try_from(value).map_err(|_| ProcessingError::SizeOverflow)?)
+                    .ok_or(ProcessingError::SizeOverflow)?
+            }
+            ModulationIndexDomain::ObservationOrdinal if rank == 2 => i64::try_from(
+                observation_ordinals
+                    .and_then(|mapping| mapping.get(logical[axis]))
+                    .copied()
+                    .unwrap_or(logical[axis]),
+            )
+            .map_err(|_| ProcessingError::SizeOverflow)?,
+            ModulationIndexDomain::ObservationOrdinal
+                if resolved.transform().modulation().period() == 1 =>
+            {
+                0
+            }
+            ModulationIndexDomain::ObservationOrdinal => {
+                return Err(ProcessingError::Mapping(
+                    "observation ordinal modulation is unsupported for rank three",
+                ));
+            }
+        };
+        // The other indirect axis supplies independent lanes; the direct axis
+        // supplies the complex basis used by the vendor transform.
+        for lane in 0..spectator_lanes {
+            if let Some(spectator) = spectator {
+                components[spectator] = lane;
+            }
+            control.charge((lanes as u128) * 2)?;
+            input.clear();
+            for lane in 0..lanes {
+                components[axis] = lane;
+                components[rank - 1] = 0;
+                let re = tensor_sample(current, &step.before, logical, components)?;
+                components[rank - 1] = 1;
+                let im = tensor_sample(current, &step.before, logical, components)?;
+                input.push(Complex64::new(re, im));
+            }
             let transformed = resolved
                 .transform()
                 .apply(&input, modulation_index)
                 .map_err(|_| ProcessingError::Mapping("component transform application failed"))?;
-            for (component, value) in transformed.into_iter().enumerate() {
-                tensor_set(
-                    &mut output,
-                    &step.after,
-                    &logical,
-                    &[component, 0],
-                    value.re,
-                )?;
-                tensor_set(
-                    &mut output,
-                    &step.after,
-                    &logical,
-                    &[component, 1],
-                    value.im,
-                )?;
+            for (lane, value) in transformed.into_iter().enumerate() {
+                components[axis] = lane;
+                components[rank - 1] = 0;
+                tensor_set(&mut output, &step.after, logical, components, value.re)?;
+                components[rank - 1] = 1;
+                tensor_set(&mut output, &step.after, logical, components, value.im)?;
             }
         }
     }

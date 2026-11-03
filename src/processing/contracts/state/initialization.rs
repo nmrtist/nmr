@@ -124,9 +124,9 @@ impl PlanState {
 pub(crate) fn expand_raw_descriptor(
     raw_axes: &[crate::raw::RawAxis],
 ) -> Result<ProcessedDescriptor, StateError> {
-    if !(1..=2).contains(&raw_axes.len()) {
+    if !(1..=3).contains(&raw_axes.len()) {
         return Err(StateError::Mapping(
-            "only rank-1 and rank-2 raw data is supported",
+            "only rank-1 through rank-3 raw data is supported",
         ));
     }
     let mut axes = Vec::new();

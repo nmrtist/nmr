@@ -75,7 +75,7 @@ pub enum ProcessingError {
     /// Raw component lanes cannot be mapped without inventing meaning.
     #[error("raw-to-processed mapping failed: {0}")]
     Mapping(&'static str),
-    /// Dense processing deliberately supports only rank one and two.
+    /// Dense processing deliberately supports only ranks one through three.
     #[error("dense processing does not support rank {rank}")]
     UnsupportedRank {
         /// Raw descriptor rank.
